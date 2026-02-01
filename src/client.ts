@@ -1,6 +1,10 @@
 import * as cheerio from "cheerio";
+import { Cookie } from "tough-cookie";
 import { AuthManager } from "./auth.js";
 import { Config } from "./config.js";
+
+const MAX_AUTH_RETRIES = 2;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export class RefTownClient {
   private auth: AuthManager;
@@ -18,7 +22,8 @@ export class RefTownClient {
 
   async get(
     path: string,
-    params?: Record<string, string>
+    params?: Record<string, string>,
+    _retryDepth = 0
   ): Promise<cheerio.CheerioAPI> {
     await this.auth.ensureAuthenticated();
     await this.rateLimit();
@@ -39,16 +44,19 @@ export class RefTownClient {
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       },
       redirect: "manual",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     // Detect session expiry (redirect back to login)
     if (response.status === 302 || response.status === 301) {
       const location = response.headers.get("location") ?? "";
       if (location.toLowerCase().includes("login")) {
+        if (_retryDepth >= MAX_AUTH_RETRIES) {
+          throw new Error(`Session expired fetching ${path} and re-auth failed after ${MAX_AUTH_RETRIES} retries`);
+        }
         this.auth.handleSessionExpiry();
-        // Retry once after re-authenticating
         await this.auth.ensureAuthenticated();
-        return this.get(path, params);
+        return this.get(path, params, _retryDepth + 1);
       }
     }
 
@@ -60,25 +68,18 @@ export class RefTownClient {
 
     const html = await response.text();
 
-    // Check for login redirect in HTML meta refresh
+    // Check for login redirect in HTML meta refresh or inline login form
     if (
-      html.includes('url=login.asp') ||
-      html.includes("url=login.asp")
-    ) {
-      this.auth.handleSessionExpiry();
-      await this.auth.ensureAuthenticated();
-      return this.get(path, params);
-    }
-
-    // Check for inline login form (RefTown renders login form on the same URL
-    // instead of redirecting when the session has expired)
-    if (
+      html.includes("url=login.asp") ||
       html.includes("Log in to view") ||
       html.includes('id="Username"')
     ) {
+      if (_retryDepth >= MAX_AUTH_RETRIES) {
+        throw new Error(`Session expired fetching ${path} and re-auth failed after ${MAX_AUTH_RETRIES} retries`);
+      }
       this.auth.handleSessionExpiry();
       await this.auth.ensureAuthenticated();
-      return this.get(path, params);
+      return this.get(path, params, _retryDepth + 1);
     }
 
     return cheerio.load(html);
@@ -86,7 +87,8 @@ export class RefTownClient {
 
   async post(
     path: string,
-    formData: Record<string, string>
+    formData: Record<string, string>,
+    _retryDepth = 0
   ): Promise<cheerio.CheerioAPI> {
     await this.auth.ensureAuthenticated();
     await this.rateLimit();
@@ -107,13 +109,13 @@ export class RefTownClient {
       },
       body: body.toString(),
       redirect: "manual",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     // Store any new cookies from the response
     const setCookieHeaders = response.headers.getSetCookie();
     for (const header of setCookieHeaders) {
       try {
-        const { Cookie } = await import("tough-cookie");
         const cookie = Cookie.parse(header);
         if (cookie) {
           await this.auth.getCookieJar().setCookie(cookie, url);
@@ -128,9 +130,12 @@ export class RefTownClient {
       const location = response.headers.get("location");
       if (location) {
         if (location.toLowerCase().includes("login")) {
+          if (_retryDepth >= MAX_AUTH_RETRIES) {
+            throw new Error(`Session expired posting to ${path} and re-auth failed after ${MAX_AUTH_RETRIES} retries`);
+          }
           this.auth.handleSessionExpiry();
           await this.auth.ensureAuthenticated();
-          return this.post(path, formData);
+          return this.post(path, formData, _retryDepth + 1);
         }
         // Follow the redirect
         const redirectPath = location.startsWith("http")
@@ -153,9 +158,12 @@ export class RefTownClient {
       html.includes("Log in to view") ||
       html.includes('id="Username"')
     ) {
+      if (_retryDepth >= MAX_AUTH_RETRIES) {
+        throw new Error(`Session expired posting to ${path} and re-auth failed after ${MAX_AUTH_RETRIES} retries`);
+      }
       this.auth.handleSessionExpiry();
       await this.auth.ensureAuthenticated();
-      return this.post(path, formData);
+      return this.post(path, formData, _retryDepth + 1);
     }
 
     return cheerio.load(html);

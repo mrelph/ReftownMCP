@@ -33,16 +33,28 @@ const server = new McpServer({
   version: "0.1.0",
 });
 
+function errorResult(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    content: [{ type: "text" as const, text: `Error: ${message}` }],
+    isError: true,
+  };
+}
+
 // --- Tool Registrations ---
 
 server.registerTool("login", {
   description:
     "Log in to RefTown. Call this before using other tools, or it will auto-login as needed.",
 }, async () => {
-  const result = await loginTool(client);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await loginTool(client);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("get_schedule", {
@@ -50,40 +62,56 @@ server.registerTool("get_schedule", {
     "Fetch your upcoming (or past) game assignments from RefTown.",
   inputSchema: getScheduleSchema.shape,
 }, async (args) => {
-  const result = await getScheduleTool(client, args);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await getScheduleTool(client, args);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("get_game_details", {
   description: "Get detailed information about a specific game assignment.",
   inputSchema: getGameDetailsSchema.shape,
 }, async (args) => {
-  const result = await getGameDetailsTool(client, args);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await getGameDetailsTool(client, args);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("accept_game", {
-  description: "Accept a game assignment.",
+  description: "Accept a game assignment. (Not yet implemented — stub.)",
   inputSchema: acceptGameSchema.shape,
 }, async (args) => {
-  const result = await acceptGameTool(client, args);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await acceptGameTool(client, args);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("decline_game", {
-  description: "Decline a game assignment, with an optional reason.",
+  description: "Decline a game assignment, with an optional reason. (Not yet implemented — stub.)",
   inputSchema: declineGameSchema.shape,
 }, async (args) => {
-  const result = await declineGameTool(client, args);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await declineGameTool(client, args);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("get_availability", {
@@ -91,21 +119,29 @@ server.registerTool("get_availability", {
     "View your availability calendar for a given month/year.",
   inputSchema: getAvailabilitySchema.shape,
 }, async (args) => {
-  const result = await getAvailabilityTool(client, args);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await getAvailabilityTool(client, args);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("set_availability", {
   description:
-    "Update your availability for one or more dates.",
+    "Update your availability for one or more dates. (Not yet implemented — stub.)",
   inputSchema: setAvailabilitySchema.shape,
 }, async (args) => {
-  const result = await setAvailabilityTool(client, args);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await setAvailabilityTool(client, args);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("get_contacts", {
@@ -113,29 +149,41 @@ server.registerTool("get_contacts", {
     "Fetch official/crew contact information. Optionally filter by name.",
   inputSchema: getContactsSchema.shape,
 }, async (args) => {
-  const result = await getContactsTool(client, args);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await getContactsTool(client, args);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("get_profile", {
   description: "View your RefTown official profile.",
 }, async () => {
-  const result = await getProfileTool(client);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await getProfileTool(client);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 server.registerTool("get_calendar_feed_url", {
   description:
     "Get your iCal calendar subscription URLs (games+events, games only, events only) for syncing RefTown to your calendar app.",
 }, async () => {
-  const result = await getCalendarFeedUrlTool(client);
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  try {
+    const result = await getCalendarFeedUrlTool(client);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
 });
 
 // --- Start server ---
