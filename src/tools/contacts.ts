@@ -6,60 +6,81 @@ export const getContactsSchema = z.object({
   search: z
     .string()
     .optional()
-    .describe("Optional search term to filter contacts by name"),
+    .describe("Optional search term to filter contacts by name (client-side filter)"),
 });
 
 export async function getContactsTool(
   client: RefTownClient,
   args: z.infer<typeof getContactsSchema>
 ): Promise<{ contacts: Contact[]; rawPreview?: string }> {
-  const params: Record<string, string> = {};
-  if (args.search) {
-    params["Search"] = args.search;
-    params["q"] = args.search;
-  }
-
-  const $ = await client.get("contacts.asp", params);
+  // Server doesn't support search params — always fetch all contacts
+  const $ = await client.get("contacts.asp");
   const contacts: Contact[] = [];
 
-  // Parse contacts table
-  $("table tr").each((i, row) => {
-    if (i === 0) return; // Skip header
+  // Real RefTown HTML: table.subtable.floatheader
+  // Rows: tr (skip header row with th elements)
+  // Per row (4 columns):
+  //   Col 0: vCard link (a[href*="vcard.asp"]) — extract OID
+  //   Col 1: Title in B tag, Name in a[href*="roster.asp"]
+  //   Col 2: Address (usually empty)
+  //   Col 3: Nested table with phone (a[href*="tel://"]) and email (JS obfuscation)
+  $("table.subtable.floatheader tr").each((_, row) => {
+    // Skip header rows
+    if ($(row).find("th").length > 0) return;
 
-    const cells = $(row).find("td");
-    if (cells.length < 2) return;
+    const cells = $(row).find("> td");
+    if (cells.length < 4) return;
 
-    const contact: Contact = {
-      name: $(cells[0]).text().trim(),
-      email: cells.length > 1 ? $(cells[1]).text().trim() || $(cells[1]).find("a[href^='mailto']").attr("href")?.replace("mailto:", "") : undefined,
-      phone: cells.length > 2 ? $(cells[2]).text().trim() : undefined,
-      role: cells.length > 3 ? $(cells[3]).text().trim() : undefined,
-      organization: cells.length > 4 ? $(cells[4]).text().trim() : undefined,
-    };
+    // Column 0: vCard link
+    const col0 = $(cells[0]);
+    const vCardLink = col0.find('a[href*="vcard.asp"]').attr("href");
+    const vCardUrl = vCardLink || undefined;
 
-    if (contact.name) {
-      contacts.push(contact);
+    // Column 1: Title (B tag) + Name (roster link)
+    const col1 = $(cells[1]);
+    const title = col1.find("B").first().text().trim() || undefined;
+    const nameLink = col1.find('a[href*="roster.asp"]');
+    const name = nameLink.text().trim() || col1.text().trim();
+
+    // Column 2: Address (often empty)
+    // Not extracted — usually blank in RefTown contacts
+
+    // Column 3: Phone + Email (obfuscated)
+    const col3 = $(cells[3]);
+
+    // Phone: look for tel:// links
+    const phoneLink = col3.find('a[href*="tel://"]');
+    let phone: string | undefined;
+    if (phoneLink.length > 0) {
+      phone = phoneLink.text().trim() ||
+        phoneLink.attr("href")?.replace("tel://", "") || undefined;
+    }
+
+    // Email: parse inline script for var sb_domain and var sb_user
+    // RefTown obfuscates emails with JS: var sb_domain = 'example.com'; var sb_user = 'john';
+    let email: string | undefined;
+    const scripts = col3.find("script");
+    scripts.each((_, script) => {
+      const scriptText = $(script).text();
+      const domainMatch = scriptText.match(/var\s+sb_domain\s*=\s*'([^']+)'/);
+      const userMatch = scriptText.match(/var\s+sb_user\s*=\s*'([^']+)'/);
+      if (domainMatch && userMatch) {
+        email = `${userMatch[1]}@${domainMatch[1]}`;
+      }
+    });
+
+    if (name) {
+      contacts.push({
+        name,
+        title,
+        email,
+        phone,
+        vCardUrl,
+      });
     }
   });
 
-  // Try alternative parsing if table approach found nothing
-  if (contacts.length === 0) {
-    $(".contact, .official, .person").each((_, el) => {
-      const contact: Contact = {
-        name: $(el).find(".name, a").first().text().trim(),
-        email: ($(el).find("a[href^='mailto']").attr("href")?.replace("mailto:", "")) ??
-          ($(el).find(".email").text().trim() || undefined),
-        phone: $(el).find(".phone, .tel").text().trim() || undefined,
-        role: $(el).find(".role, .position").text().trim() || undefined,
-        organization: $(el).find(".org, .organization").text().trim() || undefined,
-      };
-      if (contact.name) {
-        contacts.push(contact);
-      }
-    });
-  }
-
-  // Filter by search term if provided and contacts were found
+  // Client-side filter by search term
   let filtered = contacts;
   if (args.search && contacts.length > 0) {
     const term = args.search.toLowerCase();
@@ -67,7 +88,7 @@ export async function getContactsTool(
       (c) =>
         c.name.toLowerCase().includes(term) ||
         c.email?.toLowerCase().includes(term) ||
-        c.role?.toLowerCase().includes(term)
+        c.title?.toLowerCase().includes(term)
     );
   }
 

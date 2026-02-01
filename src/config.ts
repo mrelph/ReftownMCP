@@ -1,4 +1,4 @@
-export const BASE_URL = "https://www.reftown.com";
+export const BASE_URL = "https://reftown.com";
 
 export interface Config {
   username: string;
@@ -21,6 +21,6 @@ export function loadConfig(): Config {
     username,
     password,
     baseUrl: process.env.REFTOWN_BASE_URL ?? BASE_URL,
-    requestDelayMs: Number(process.env.REFTOWN_DELAY_MS ?? "500"),
+    requestDelayMs: Number(process.env.REFTOWN_DELAY_MS ?? "2000"),
   };
 }

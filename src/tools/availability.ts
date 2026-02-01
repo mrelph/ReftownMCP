@@ -12,7 +12,7 @@ export const getAvailabilitySchema = z.object({
   year: z
     .number()
     .optional()
-    .describe("Year (e.g. 2025). Defaults to current year."),
+    .describe("Year (e.g. 2026). Defaults to current year."),
 });
 
 export const setAvailabilitySchema = z.object({
@@ -37,129 +37,119 @@ export async function getAvailabilityTool(
   const month = args.month ?? now.getMonth() + 1;
   const year = args.year ?? now.getFullYear();
 
-  // Availability is under Schedules -> Availability
-  // Exact URL needs discovery, common patterns:
+  // First fetch to discover OffRID from page links (needed for navigation)
   const params: Record<string, string> = {
-    Month: String(month),
-    Year: String(year),
+    month: String(month),
+    year: String(year),
   };
 
-  // Try the most likely paths
-  let $;
-  try {
+  // Try to get OffRID from the page if we don't have it yet
+  let $ = await client.get("availability.asp", params);
+  const offRidLink = $("a[href*='OffRID=']").first().attr("href") ?? "";
+  const offRidMatch = offRidLink.match(/OffRID=(\d+)/i);
+  if (offRidMatch) {
+    params["OffRID"] = offRidMatch[1];
     $ = await client.get("availability.asp", params);
-  } catch {
-    try {
-      $ = await client.get("events.asp", { ...params, Focus: "Availability" });
-    } catch {
-      $ = await client.get("default.asp", { ...params, Focus: "Availability" });
-    }
   }
 
   const days: AvailabilityDay[] = [];
 
-  // Parse availability calendar - typically a calendar grid or table
-  // The exact structure needs discovery, but common patterns:
-
-  // Pattern 1: Calendar table with day cells
-  $("td.day, td.calDay, td[class*=day]").each((_, el) => {
-    const dayNum = $!(el).find(".dayNum, .dayNumber").text().trim() ||
-      $!(el).text().trim().match(/^\d{1,2}/)?.[0];
-
-    if (!dayNum) return;
+  // Real RefTown HTML: table.subtable.availcal
+  // Day cells: td.availcal or td.availcaltoday
+  // Day number: div.availcal_date
+  // Availability details: nested table.availdetails
+  $("table.subtable.availcal td.availcal, table.subtable.availcal td.availcaltoday").each((_, cell) => {
+    const dayNum = $(cell).find("div.availcal_date").text().trim();
+    if (!dayNum || !/^\d{1,2}$/.test(dayNum)) return;
 
     const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
-    const classes = $!(el).attr("class") ?? "";
-    const available = !classes.includes("unavail") && !classes.includes("blocked");
-    const note = $!(el).find(".note, .comment").text().trim() || undefined;
 
-    days.push({ date: dateStr, available, note });
-  });
+    let available = false;
+    let source: string | undefined;
+    let timeRestriction: string | undefined;
+    let hasGame = false;
+    let gameLink: string | undefined;
+    let note: string | undefined;
 
-  // Pattern 2: List-based availability
-  if (days.length === 0) {
-    $("tr[class*=avail], .availability-row, .avail-entry").each((_, el) => {
-      const dateText = $!(el).find("td:first-child, .date").text().trim();
-      const statusText = $!(el).find("td:nth-child(2), .status").text().trim();
-      const note = $!(el).find("td:nth-child(3), .note").text().trim() || undefined;
+    // Check nested table.availdetails for availability info
+    const detailsTable = $(cell).find("table.availdetails");
+    if (detailsTable.length > 0) {
+      detailsTable.find("tr").each((_, detailRow) => {
+        const rowText = $(detailRow).text().trim();
+        const bgColor = $(detailRow).find("td").attr("bgcolor") ?? "";
 
-      if (dateText) {
-        days.push({
-          date: dateText,
-          available: statusText.toLowerCase().includes("avail") && !statusText.toLowerCase().includes("unavail"),
-          note,
-        });
+        // Background color indicates availability:
+        // #EEFFEE = available, #FFFFDD = restricted/partial
+        if (bgColor.toLowerCase() === "#eeffee") {
+          available = true;
+        } else if (bgColor.toLowerCase() === "#ffffdd") {
+          available = true; // restricted but still partially available
+        }
+
+        if (rowText.toLowerCase().includes("available")) {
+          available = true;
+        }
+
+        // Time restriction: cells with "From"/"To" + time value
+        const fromMatch = rowText.match(/From\s+(.+)/i);
+        const toMatch = rowText.match(/To\s+(.+)/i);
+        if (fromMatch || toMatch) {
+          const parts: string[] = [];
+          if (fromMatch) parts.push(`From ${fromMatch[1].trim()}`);
+          if (toMatch) parts.push(`To ${toMatch[1].trim()}`);
+          timeRestriction = parts.join(" ");
+        }
+
+        // Source: span text like "Day-of-Week", "CHOA Date-Specific", "Global"
+        const sourceSpan = $(detailRow).find("span").text().trim();
+        if (sourceSpan) {
+          source = sourceSpan;
+        }
+      });
+    }
+
+    // Working indicator: div.working with game link
+    const workingDiv = $(cell).find("div.working");
+    if (workingDiv.length > 0) {
+      hasGame = true;
+      const workingLink = workingDiv.find("a").attr("href");
+      if (workingLink) {
+        gameLink = workingLink;
       }
+    }
+
+    days.push({
+      date: dateStr,
+      available,
+      note,
+      source,
+      timeRestriction: timeRestriction || undefined,
+      hasGame: hasGame || undefined,
+      gameLink,
     });
-  }
+  });
 
   const rawPreview =
     days.length === 0
-      ? $!("body").text().replace(/\s+/g, " ").trim().slice(0, 500)
+      ? $("body").text().replace(/\s+/g, " ").trim().slice(0, 500)
       : undefined;
 
   return { days, rawPreview };
 }
 
+// TODO: setAvailability requires POSTing to jx_editavail.asp (AJAX endpoint).
+// The form fields and expected parameters for that endpoint have not been
+// discovered yet. This remains a stub until that page's structure is mapped.
+
 export async function setAvailabilityTool(
-  client: RefTownClient,
-  args: z.infer<typeof setAvailabilitySchema>
+  _client: RefTownClient,
+  _args: z.infer<typeof setAvailabilitySchema>
 ): Promise<{ success: boolean; message: string; updated: string[] }> {
-  const updated: string[] = [];
-  const errors: string[] = [];
-
-  for (const entry of args.dates) {
-    try {
-      // First, navigate to the availability page for the correct month
-      const [year, month] = entry.date.split("-").map(Number);
-
-      const params: Record<string, string> = {
-        Month: String(month),
-        Year: String(year),
-      };
-
-      let $;
-      try {
-        $ = await client.get("availability.asp", params);
-      } catch {
-        $ = await client.get("events.asp", { ...params, Focus: "Availability" });
-      }
-
-      const hiddenFields = client.extractHiddenFields($);
-
-      // POST the availability update
-      // Exact field names need discovery
-      const formData: Record<string, string> = {
-        ...hiddenFields,
-        Date: entry.date,
-        Available: entry.available ? "1" : "0",
-        Action: "SetAvailability",
-      };
-      if (entry.note) {
-        formData["Note"] = entry.note;
-        formData["Comment"] = entry.note;
-      }
-
-      await client.post("availability.asp", formData);
-      updated.push(entry.date);
-    } catch (error) {
-      errors.push(
-        `${entry.date}: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-  }
-
-  if (errors.length > 0) {
-    return {
-      success: updated.length > 0,
-      message: `Updated ${updated.length}/${args.dates.length} dates. Errors: ${errors.join("; ")}`,
-      updated,
-    };
-  }
-
   return {
-    success: true,
-    message: `Updated availability for ${updated.length} dates`,
-    updated,
+    success: false,
+    message:
+      "Stub: setAvailability not yet implemented. " +
+      "The edit endpoint jx_editavail.asp form structure needs to be discovered first.",
+    updated: [],
   };
 }

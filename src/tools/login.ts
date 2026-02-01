@@ -1,8 +1,5 @@
-import { z } from "zod";
 import { RefTownClient } from "../client.js";
 import type { LoginResult } from "../types.js";
-
-export const loginSchema = z.object({});
 
 export async function loginTool(
   client: RefTownClient
@@ -11,15 +8,35 @@ export async function loginTool(
   const result = await auth.login();
 
   if (result.success) {
-    // Try to fetch the landing page to confirm and extract the user's name
     try {
       const $ = await client.get("default.asp");
-      const welcomeText = $("body").text();
-      const nameMatch = welcomeText.match(/Welcome[,\s]+([^<\n]+)/i);
+
+      // RefTown shows the user's name as a bracketed link in the nav bar,
+      // e.g. [Massey Relph]. Also available in table.subtable.accountlinktable.
+      let name: string | undefined;
+
+      // Try nav bar: look for link text matching [Name]
+      $("a").each((_, el) => {
+        if (name) return;
+        const text = $(el).text().trim();
+        const bracketMatch = text.match(/^\[(.+)\]$/);
+        if (bracketMatch) {
+          name = bracketMatch[1].trim();
+        }
+      });
+
+      // Fallback: try accountlinktable
+      if (!name) {
+        const accountTable = $("table.subtable.accountlinktable");
+        if (accountTable.length > 0) {
+          name = accountTable.find("tr").first().text().trim() || undefined;
+        }
+      }
+
       return {
         success: true,
         message: result.message,
-        name: nameMatch?.[1]?.trim(),
+        name,
       };
     } catch {
       return { success: true, message: result.message };

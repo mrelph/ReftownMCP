@@ -70,6 +70,17 @@ export class RefTownClient {
       return this.get(path, params);
     }
 
+    // Check for inline login form (RefTown renders login form on the same URL
+    // instead of redirecting when the session has expired)
+    if (
+      html.includes("Log in to view") ||
+      html.includes('id="Username"')
+    ) {
+      this.auth.handleSessionExpiry();
+      await this.auth.ensureAuthenticated();
+      return this.get(path, params);
+    }
+
     return cheerio.load(html);
   }
 
@@ -136,6 +147,17 @@ export class RefTownClient {
     }
 
     const html = await response.text();
+
+    // Check for inline login form on POST responses
+    if (
+      html.includes("Log in to view") ||
+      html.includes('id="Username"')
+    ) {
+      this.auth.handleSessionExpiry();
+      await this.auth.ensureAuthenticated();
+      return this.post(path, formData);
+    }
+
     return cheerio.load(html);
   }
 

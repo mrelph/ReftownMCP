@@ -1,6 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { AuthManager } from "./auth.js";
 import { RefTownClient } from "./client.js";
@@ -131,7 +130,7 @@ server.registerTool("get_profile", {
 
 server.registerTool("get_calendar_feed_url", {
   description:
-    "Get your iCal calendar subscription URL for syncing RefTown games to your calendar app.",
+    "Get your iCal calendar subscription URLs (games+events, games only, events only) for syncing RefTown to your calendar app.",
 }, async () => {
   const result = await getCalendarFeedUrlTool(client);
   return {

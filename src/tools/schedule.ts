@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { RefTownClient } from "../client.js";
-import type { Game, ScheduleResult } from "../types.js";
+import type { Game, CrewMember, ScheduleResult } from "../types.js";
 
 export const getScheduleSchema = z.object({
   period: z
@@ -10,15 +10,15 @@ export const getScheduleSchema = z.object({
 });
 
 export const getGameDetailsSchema = z.object({
-  gameId: z.string().describe("The game/event ID to get details for"),
+  gameId: z.string().describe("The game RID (e.g. '12345' from games.asp?RID=12345)"),
 });
 
 export const acceptGameSchema = z.object({
-  gameId: z.string().describe("The game/event ID to accept"),
+  gameId: z.string().describe("The game RID to accept"),
 });
 
 export const declineGameSchema = z.object({
-  gameId: z.string().describe("The game/event ID to decline"),
+  gameId: z.string().describe("The game RID to decline"),
   reason: z.string().optional().describe("Optional reason for declining"),
 });
 
@@ -26,60 +26,116 @@ export async function getScheduleTool(
   client: RefTownClient,
   args: z.infer<typeof getScheduleSchema>
 ): Promise<ScheduleResult> {
-  // RefTown schedule page - the exact URL/params need discovery
-  // Common patterns: events.asp, schedule.asp, or default.asp with schedule focus
-  const $ = await client.get("events.asp");
+  const $ = await client.get("mygames.asp");
 
   const games: Game[] = [];
 
-  // Attempt to parse schedule table - structure will need adjustment after discovery
-  $("table.schedule tr, table.grid tr, table tr").each((i, row) => {
-    if (i === 0) return; // Skip header row
+  // Real RefTown HTML: table.subtable.floatheader with tr.game rows
+  // Each row has 6 columns:
+  //   0: Org (B tag) + Game ID (link games.asp?RID=NNNNN)
+  //   1: Day/Date/Time (BR-separated: Sun, 2/1/2026, 1:00 PM)
+  //   2: Sport/League/Type/Level (BR-separated)
+  //   3: Location nested table (@: venue, H: home, V: visitor)
+  //   4: Crew nested table.subtablec (header=crew type, tr.note=position+name)
+  //   5: Comments (div.gamecom) + distance from nested table
+  $("table.subtable.floatheader tr.game").each((_, row) => {
+    const cells = $(row).find("> td");
+    if (cells.length < 6) return;
 
-    const cells = $(row).find("td");
-    if (cells.length < 3) return;
+    // Column 0: Organization + Game ID
+    const col0 = $(cells[0]);
+    const organization = col0.find("B").first().text().trim();
+    const gameLink = col0.find("a[href*='games.asp']").attr("href") ?? "";
+    const ridMatch = gameLink.match(/RID=(\d+)/i);
+    const id = ridMatch?.[1] ?? "";
+
+    // Column 1: Day / Date / Time (BR-separated text nodes)
+    const col1 = $(cells[1]);
+    const col1Html = col1.html() ?? "";
+    const dateTimeParts = col1Html
+      .split(/<br\s*\/?>/i)
+      .map((s) => s.replace(/<[^>]+>/g, "").trim())
+      .filter(Boolean);
+    const day = dateTimeParts[0] ?? "";
+    const date = dateTimeParts[1] ?? "";
+    const time = dateTimeParts[2] ?? "";
+
+    // Column 2: Sport / League / Type / Level (BR-separated)
+    const col2 = $(cells[2]);
+    const col2Html = col2.html() ?? "";
+    const sportParts = col2Html
+      .split(/<br\s*\/?>/i)
+      .map((s) => s.replace(/<[^>]+>/g, "").trim())
+      .filter(Boolean);
+    const sport = sportParts[0] ?? "";
+    const league = sportParts[1] ?? "";
+    const type = sportParts[2] ?? "";
+    const level = sportParts[3] ?? "";
+
+    // Column 3: Location nested table — @: venue, H: home, V: visitor
+    const col3 = $(cells[3]);
+    let venue = "";
+    let homeTeam = "";
+    let awayTeam = "";
+    col3.find("tr").each((_, locRow) => {
+      const rowText = $(locRow).text().trim();
+      if (rowText.startsWith("@:")) {
+        venue = $(locRow).find("B").text().trim() || rowText.replace(/^@:\s*/, "");
+      } else if (rowText.startsWith("H:")) {
+        homeTeam = rowText.replace(/^H:\s*/, "").trim();
+      } else if (rowText.startsWith("V:")) {
+        awayTeam = rowText.replace(/^V:\s*/, "").trim();
+      }
+    });
+
+    // Column 4: Crew nested table.subtablec
+    const col4 = $(cells[4]);
+    const crewType = col4.find("table.subtablec tr").first().text().trim();
+    const crew: CrewMember[] = [];
+    col4.find("table.subtablec tr.note").each((_, crewRow) => {
+      const crewCells = $(crewRow).find("td");
+      const position = $(crewCells[0]).text().trim();
+      const nameEl = $(crewCells[1]);
+      const name = nameEl.text().trim();
+      const isCurrentUser = nameEl.find("span.ongame").length > 0;
+      if (name) {
+        crew.push({ name, position, isCurrentUser: isCurrentUser || undefined });
+      }
+    });
+
+    // Assignment status from div.gameacc
+    const assignmentStatus = col4.find("div.gameacc").text().trim() || undefined;
+
+    // Column 5: Comments + distance
+    const col5 = $(cells[5]);
+    const comments = col5.find("div.gamecom").text().trim() || undefined;
+    const distance = col5.find("table tr").last().text().trim() || undefined;
 
     const game: Game = {
-      id: $(row).attr("data-id") ?? $(cells[0]).find("a").attr("href")?.match(/id=(\d+)/i)?.[1] ?? `row-${i}`,
-      date: $(cells[0]).text().trim(),
-      time: $(cells[1]).text().trim(),
-      sport: $(cells[2]).text().trim(),
-      level: cells.length > 3 ? $(cells[3]).text().trim() : "",
-      homeTeam: cells.length > 4 ? $(cells[4]).text().trim() : "",
-      awayTeam: cells.length > 5 ? $(cells[5]).text().trim() : "",
-      venue: cells.length > 6 ? $(cells[6]).text().trim() : "",
-      position: cells.length > 7 ? $(cells[7]).text().trim() : "",
-      status: cells.length > 8 ? $(cells[8]).text().trim() : "",
-      crew: [],
+      id,
+      date,
+      time,
+      day: day || undefined,
+      sport,
+      league: league || undefined,
+      type: type || undefined,
+      level,
+      homeTeam,
+      awayTeam,
+      venue,
+      position: crew.find((c) => c.isCurrentUser)?.position ?? "",
+      status: assignmentStatus ?? "",
+      organization: organization || undefined,
+      crewType: crewType || undefined,
+      distance: distance || undefined,
+      assignmentStatus,
+      crew,
+      comments,
     };
 
     games.push(game);
   });
 
-  // If table parsing didn't find games, try alternative parsing
-  if (games.length === 0) {
-    // Some schedules use div-based layouts
-    $(".event, .game, .assignment").each((i, el) => {
-      const game: Game = {
-        id: $(el).attr("data-id") ?? $(el).attr("id") ?? `item-${i}`,
-        date: $(el).find(".date").text().trim(),
-        time: $(el).find(".time").text().trim(),
-        sport: $(el).find(".sport").text().trim(),
-        level: $(el).find(".level").text().trim(),
-        homeTeam: $(el).find(".home").text().trim(),
-        awayTeam: $(el).find(".away, .visitor").text().trim(),
-        venue: $(el).find(".venue, .location").text().trim(),
-        position: $(el).find(".position, .role").text().trim(),
-        status: $(el).find(".status").text().trim(),
-        crew: [],
-      };
-      if (game.date || game.homeTeam) {
-        games.push(game);
-      }
-    });
-  }
-
-  // If still no games found, return the page text for debugging
   if (games.length === 0) {
     const bodyText = $("body").text().replace(/\s+/g, " ").trim();
     return {
@@ -95,117 +151,58 @@ export async function getGameDetailsTool(
   client: RefTownClient,
   args: z.infer<typeof getGameDetailsSchema>
 ): Promise<Game> {
-  // Exact endpoint needs discovery - likely events.asp?id=X or similar
-  const $ = await client.get("events.asp", { id: args.gameId });
+  // TODO: games.asp detail page HTML structure not yet discovered.
+  // Fetching games.asp?RID=X and extracting what we can.
+  const $ = await client.get("games.asp", { RID: args.gameId });
+
+  const bodyText = $("body").text().replace(/\s+/g, " ").trim();
 
   const game: Game = {
     id: args.gameId,
-    date: $(".date, [class*=date]").first().text().trim(),
-    time: $(".time, [class*=time]").first().text().trim(),
-    sport: $(".sport, [class*=sport]").first().text().trim(),
-    level: $(".level, [class*=level]").first().text().trim(),
-    homeTeam: $(".home, [class*=home]").first().text().trim(),
-    awayTeam: $(".away, .visitor, [class*=away], [class*=visitor]").first().text().trim(),
-    venue: $(".venue, .location, [class*=venue], [class*=location]").first().text().trim(),
-    position: $(".position, .role, [class*=position]").first().text().trim(),
-    status: $(".status, [class*=status]").first().text().trim(),
+    date: "",
+    time: "",
+    sport: "",
+    level: "",
+    homeTeam: "",
+    awayTeam: "",
+    venue: "",
+    position: "",
+    status: "",
     crew: [],
-    notes: $(".notes, [class*=notes]").first().text().trim() || undefined,
+    comments: bodyText.slice(0, 1000) || undefined,
   };
 
-  // Try to extract crew list
-  $(".crew tr, .officials tr, table tr").each((i, row) => {
-    if (i === 0) return;
-    const cells = $(row).find("td");
-    if (cells.length >= 2) {
-      game.crew.push({
-        name: $(cells[0]).text().trim(),
-        position: $(cells[1]).text().trim(),
-        phone: cells.length > 2 ? $(cells[2]).text().trim() : undefined,
-        email: cells.length > 3 ? $(cells[3]).text().trim() : undefined,
-      });
-    }
-  });
+  // Try to extract basic info from whatever structure games.asp provides
+  const head = $("div.head1md, div.head1, h1, h2").first().text().trim();
+  if (head) {
+    game.comments = `Page heading: ${head}. ${game.comments}`;
+  }
 
   return game;
 }
 
+// TODO: mygames.asp is read-only ("This page can only be used to view the games").
+// Accept/decline must go through games.asp?RID=X which hasn't been fully discovered.
+// These remain stubs until the games.asp form structure is mapped.
+
 export async function acceptGameTool(
-  client: RefTownClient,
+  _client: RefTownClient,
   args: z.infer<typeof acceptGameSchema>
 ): Promise<{ success: boolean; message: string }> {
-  try {
-    // First, get the game page to find the accept form/hidden fields
-    const $ = await client.get("events.asp", { id: args.gameId });
-    const hiddenFields = client.extractHiddenFields($);
-
-    // POST the acceptance - exact field names need discovery
-    const formData: Record<string, string> = {
-      ...hiddenFields,
-      EventID: args.gameId,
-      Action: "Accept",
-    };
-
-    const result$ = await client.post("events.asp", formData);
-    const responseText = result$("body").text();
-
-    if (
-      responseText.includes("accepted") ||
-      responseText.includes("confirmed") ||
-      responseText.includes("success")
-    ) {
-      return { success: true, message: `Game ${args.gameId} accepted` };
-    }
-
-    return {
-      success: false,
-      message: `Accept may not have worked. Page content: ${responseText.slice(0, 300)}`,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Failed to accept game: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
+  return {
+    success: false,
+    message: `Stub: accept for game ${args.gameId} not yet implemented. ` +
+      "The accept form on games.asp?RID=X needs to be discovered first.",
+  };
 }
 
 export async function declineGameTool(
-  client: RefTownClient,
+  _client: RefTownClient,
   args: z.infer<typeof declineGameSchema>
 ): Promise<{ success: boolean; message: string }> {
-  try {
-    const $ = await client.get("events.asp", { id: args.gameId });
-    const hiddenFields = client.extractHiddenFields($);
-
-    const formData: Record<string, string> = {
-      ...hiddenFields,
-      EventID: args.gameId,
-      Action: "Decline",
-    };
-    if (args.reason) {
-      formData["Reason"] = args.reason;
-      formData["DeclineReason"] = args.reason;
-    }
-
-    const result$ = await client.post("events.asp", formData);
-    const responseText = result$("body").text();
-
-    if (
-      responseText.includes("declined") ||
-      responseText.includes("success") ||
-      responseText.includes("removed")
-    ) {
-      return { success: true, message: `Game ${args.gameId} declined` };
-    }
-
-    return {
-      success: false,
-      message: `Decline may not have worked. Page content: ${responseText.slice(0, 300)}`,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `Failed to decline game: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
+  return {
+    success: false,
+    message: `Stub: decline for game ${args.gameId} not yet implemented. ` +
+      "The decline form on games.asp?RID=X needs to be discovered first.",
+  };
 }

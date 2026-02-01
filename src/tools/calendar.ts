@@ -1,68 +1,58 @@
-import { z } from "zod";
 import { RefTownClient } from "../client.js";
-import type { CalendarFeed } from "../types.js";
-
-export const getCalendarFeedUrlSchema = z.object({});
+import type { CalendarFeedEntry, CalendarFeedResult } from "../types.js";
 
 export async function getCalendarFeedUrlTool(
   client: RefTownClient
-): Promise<CalendarFeed> {
-  // The iCal feed URL is available at profile.asp?Focus=ShowPAK
+): Promise<CalendarFeedResult> {
   const $ = await client.get("profile.asp", { Focus: "ShowPAK" });
 
-  // Look for iCal/webcal URLs on the page
-  let url = "";
+  const feeds: CalendarFeedEntry[] = [];
 
-  // Pattern 1: Link element with webcal/ical href
-  $("a[href*='webcal'], a[href*='ical'], a[href*='.ics']").each((_, el) => {
-    if (!url) {
-      url = $(el).attr("href") ?? "";
-    }
-  });
+  // Real RefTown HTML has 3 tab panes with different feed scopes:
+  //   div#TabsX-1-0 → Games + Events
+  //   div#TabsX-1-2 → Games only
+  //   div#TabsX-1-4 → Events only
+  const tabScopes: { selector: string; scope: CalendarFeedEntry["scope"] }[] = [
+    { selector: "div#TabsX-1-0", scope: "games+events" },
+    { selector: "div#TabsX-1-2", scope: "games" },
+    { selector: "div#TabsX-1-4", scope: "events" },
+  ];
 
-  // Pattern 2: Input field containing the URL
-  if (!url) {
-    $("input[value*='webcal'], input[value*='ical'], input[value*='.ics']").each(
-      (_, el) => {
-        if (!url) {
-          url = ($(el).val() as string) ?? "";
-        }
-      }
-    );
-  }
+  for (const { selector, scope } of tabScopes) {
+    const tab = $(selector);
+    if (tab.length === 0) continue;
 
-  // Pattern 3: Text content containing URL
-  if (!url) {
-    const bodyText = $("body").text();
-    const urlMatch = bodyText.match(
-      /(webcal:\/\/[^\s<"']+|https?:\/\/[^\s<"']*\.ics[^\s<"']*)/i
-    );
-    if (urlMatch) {
-      url = urlMatch[1];
-    }
-  }
+    // webcal:// link
+    const webcalLink = tab.find('a[href*="webcal"]').first().attr("href") ?? "";
+    // HTTPS variant (vsend.asp link)
+    const httpsLink = tab.find('a[href^="https"][href*="vsend.asp"]').first().attr("href") ??
+      tab.find('a[href*="vsend.asp"]').first().attr("href") ?? "";
 
-  // Pattern 4: Look for PAK (Personal Access Key) and construct URL
-  if (!url) {
-    const pakMatch = $("body").text().match(/PAK[:\s]*([A-Za-z0-9_-]+)/i);
-    const pakInput = $('input[name*="PAK"], input[name*="pak"]').val() as string;
-    const pak = pakInput ?? pakMatch?.[1];
-    if (pak) {
-      url = `webcal://www.reftown.com/ical.asp?pak=${pak}`;
+    if (webcalLink || httpsLink) {
+      feeds.push({
+        url: webcalLink || httpsLink,
+        httpsUrl: httpsLink || undefined,
+        scope,
+      });
     }
   }
 
-  if (!url) {
-    const bodyPreview = $("body").text().replace(/\s+/g, " ").trim().slice(0, 500);
-    return {
-      url: "",
-      description: `Could not find calendar feed URL. Page preview: ${bodyPreview}`,
-    };
+  // Fallback: if tab-based extraction found nothing, try any webcal link on the page
+  if (feeds.length === 0) {
+    const anyWebcal = $('a[href*="webcal"]').first().attr("href") ?? "";
+    const anyHttps = $('a[href*="vsend.asp"]').first().attr("href") ?? "";
+    if (anyWebcal || anyHttps) {
+      feeds.push({
+        url: anyWebcal || anyHttps,
+        httpsUrl: anyHttps || undefined,
+        scope: "games+events",
+      });
+    }
   }
 
-  return {
-    url,
-    description:
-      "iCal subscription URL for your RefTown schedule. Add this to Google Calendar, Apple Calendar, or Outlook.",
-  };
+  if (feeds.length === 0) {
+    return { feeds: [] };
+  }
+
+  return { feeds };
 }

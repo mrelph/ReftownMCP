@@ -30,7 +30,7 @@ export class AuthManager {
 
     // POST credentials to the login form
     const formData = new URLSearchParams({
-      UserName: this.config.username,
+      Username: this.config.username,
       Password: this.config.password,
       Submit: "Login",
     });
@@ -54,7 +54,7 @@ export class AuthManager {
     const location = postResponse.headers.get("location");
     const status = postResponse.status;
 
-    if (status === 302 || status === 301) {
+    if (status === 301 || status === 302 || status === 307 || status === 308) {
       if (location && !location.toLowerCase().includes("login")) {
         // Follow the redirect to complete the session setup
         const redirectUrl = new URL(location, this.config.baseUrl).href;
