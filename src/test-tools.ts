@@ -27,6 +27,7 @@ async function main() {
     { name: "get_contacts" },
     { name: "get_profile" },
     { name: "get_calendar_feed_url" },
+    { name: "search_open_games", args: { sport: "CDN" } },
   ];
 
   for (const test of tests) {

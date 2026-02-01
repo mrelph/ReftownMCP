@@ -14,6 +14,7 @@ const PAGES_TO_FETCH = [
   { path: "profile.asp?Focus=ShowPAK", label: "Calendar Feed / PAK" },
   { path: "contacts.asp", label: "Contacts" },
   { path: "default.asp", label: "Landing Page" },
+  { path: "games.asp?openonly=1&AltSort=Date%2FLocation%2FTime", label: "Open Games" },
 ];
 
 function summarizePage($: cheerio.CheerioAPI, label: string): string {

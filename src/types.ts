@@ -81,3 +81,9 @@ export interface ScheduleResult {
   games: Game[];
   period?: string;
 }
+
+export interface OpenGamesResult {
+  games: Game[];
+  totalFound: number;
+  filters: { zone?: string; dateQualifier?: string; sport?: string };
+}

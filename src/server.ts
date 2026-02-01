@@ -23,6 +23,10 @@ import {
 import { getContactsTool, getContactsSchema } from "./tools/contacts.js";
 import { getProfileTool } from "./tools/profile.js";
 import { getCalendarFeedUrlTool } from "./tools/calendar.js";
+import {
+  searchOpenGamesTool,
+  searchOpenGamesSchema,
+} from "./tools/open-games.js";
 
 const config = loadConfig();
 const auth = new AuthManager(config);
@@ -178,6 +182,21 @@ server.registerTool("get_calendar_feed_url", {
 }, async () => {
   try {
     const result = await getCalendarFeedUrlTool(client);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
+});
+
+server.registerTool("search_open_games", {
+  description:
+    "Search for open/unfilled games available for pickup on RefTown. Optionally filter by zone, date range, or sport.",
+  inputSchema: searchOpenGamesSchema.shape,
+}, async (args) => {
+  try {
+    const result = await searchOpenGamesTool(client, args);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
