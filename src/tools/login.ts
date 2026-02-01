@@ -11,25 +11,23 @@ export async function loginTool(
     try {
       const $ = await client.get("default.asp");
 
-      // RefTown shows the user's name as a bracketed link in the nav bar,
-      // e.g. [Massey Relph]. Also available in table.subtable.accountlinktable.
       let name: string | undefined;
 
-      // Try nav bar: look for link text matching [Name]
-      $("a").each((_, el) => {
-        if (name) return;
-        const text = $(el).text().trim();
-        const bracketMatch = text.match(/^\[(.+)\]$/);
-        if (bracketMatch) {
-          name = bracketMatch[1].trim();
-        }
-      });
+      // Name is in the nav dropdown: <UL class="dropdown ... redgrad"><LI><A>Massey Relph ...</A>
+      // The link text contains the name followed by a menu arrow image.
+      const dropdownLink = $("ul.dropdown.redgrad > li > a").first();
+      if (dropdownLink.length > 0) {
+        // Get only the text content, stripping any child elements (IMG tags)
+        name = dropdownLink.contents().filter(function () {
+          return this.type === "text";
+        }).text().trim().replace(/\s+/g, " ") || undefined;
+      }
 
-      // Fallback: try accountlinktable
+      // Fallback: get name from the accountlinktable data row (tr.aclink)
       if (!name) {
-        const accountTable = $("table.subtable.accountlinktable");
-        if (accountTable.length > 0) {
-          name = accountTable.find("tr").first().text().trim() || undefined;
+        const nameCell = $("table.subtable.accountlinktable tr.aclink td").eq(3);
+        if (nameCell.length > 0) {
+          name = nameCell.text().trim() || undefined;
         }
       }
 
