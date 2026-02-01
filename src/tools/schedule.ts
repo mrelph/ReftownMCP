@@ -94,8 +94,9 @@ export async function getScheduleTool(
     const crew: CrewMember[] = [];
     col4.find("table.subtablec tr.note").each((_, crewRow) => {
       const crewCells = $(crewRow).find("td");
-      const position = $(crewCells[0]).text().trim();
-      const nameEl = $(crewCells[1]);
+      // Cells: [0]=spacer, [1]=position (e.g. "Lineprsn 1:"), [2]=name, [3]=status icon
+      const position = $(crewCells[1]).text().trim().replace(/:$/, "");
+      const nameEl = $(crewCells[2]);
       const name = nameEl.text().trim();
       const isCurrentUser = nameEl.find("span.ongame").length > 0;
       if (name) {
@@ -109,7 +110,7 @@ export async function getScheduleTool(
     // Column 5: Comments + distance
     const col5 = $(cells[5]);
     const comments = col5.find("div.gamecom").text().trim() || undefined;
-    const distance = col5.find("table tr").last().text().trim() || undefined;
+    const distance = col5.find("table td.right").text().trim() || undefined;
 
     const game: Game = {
       id,

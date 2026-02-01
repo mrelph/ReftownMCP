@@ -76,34 +76,37 @@ export async function getAvailabilityTool(
     if (detailsTable.length > 0) {
       detailsTable.find("tr").each((_, detailRow) => {
         const rowText = $(detailRow).text().trim();
-        const bgColor = $(detailRow).find("td").attr("bgcolor") ?? "";
+        // Background color is in style attribute on the TR, e.g. style="background:#EEFFEE"
+        const style = $(detailRow).attr("style") ?? "";
+        const bgMatch = style.match(/background:\s*(#[0-9a-fA-F]+)/i);
+        const bgColor = bgMatch?.[1]?.toUpperCase() ?? "";
 
-        // Background color indicates availability:
-        // #EEFFEE = available, #FFFFDD = restricted/partial
-        if (bgColor.toLowerCase() === "#eeffee") {
+        // #EEFFEE = fully available (green), #FFFFDD = restricted/partial (yellow)
+        if (bgColor === "#EEFFEE" || bgColor === "#FFFFDD") {
           available = true;
-        } else if (bgColor.toLowerCase() === "#ffffdd") {
-          available = true; // restricted but still partially available
         }
 
         if (rowText.toLowerCase().includes("available")) {
           available = true;
         }
 
-        // Time restriction: cells with "From"/"To" + time value
-        const fromMatch = rowText.match(/From\s+(.+)/i);
-        const toMatch = rowText.match(/To\s+(.+)/i);
-        if (fromMatch || toMatch) {
+        // Time restriction: TR rows with "From"/"To" + time value in separate TDs
+        const tds = $(detailRow).find("td");
+        const firstTd = tds.first().text().trim();
+        const secondTd = tds.eq(1).text().trim();
+        if (firstTd === "From" || firstTd === "To") {
           const parts: string[] = [];
-          if (fromMatch) parts.push(`From ${fromMatch[1].trim()}`);
-          if (toMatch) parts.push(`To ${toMatch[1].trim()}`);
-          timeRestriction = parts.join(" ");
+          if (timeRestriction) parts.push(timeRestriction);
+          parts.push(`${firstTd} ${secondTd}`);
+          timeRestriction = parts.join(", ");
         }
 
-        // Source: span text like "Day-of-Week", "CHOA Date-Specific", "Global"
-        const sourceSpan = $(detailRow).find("span").text().trim();
-        if (sourceSpan) {
-          source = sourceSpan;
+        // Source: nested span.note_sm text like "Day-of-Week", "CHOA Date-Specific", "Global"
+        if (rowText.includes("Source:")) {
+          const sourceSpan = $(detailRow).find("span.note_sm").text().trim();
+          if (sourceSpan) {
+            source = sourceSpan;
+          }
         }
       });
     }
