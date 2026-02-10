@@ -57,7 +57,7 @@ export async function getProfileTool(
     $(el).text().includes("Custom Fields")
   );
   if (customFieldsHeading.length > 0) {
-    const customTable = customFieldsHeading.next("table");
+    const customTable = customFieldsHeading.nextAll("table").first();
     customTable.find("li").each((_, li) => {
       const bold = $(li).find("B").first();
       const fieldName = bold.text().trim().replace(/:$/, "");
