@@ -24,6 +24,8 @@ export interface CrewMember {
   name: string;
   position: string;
   isCurrentUser?: boolean;
+  unassigned?: boolean;
+  fee?: string;
   phone?: string;
   email?: string;
 }

@@ -67,18 +67,35 @@ export function parseGameTable($: CheerioAPI): Game[] {
     });
 
     // Column 4: Crew nested table.subtablec
+    // Schedule pages use tr.note for crew rows; open games pages use tr.hv
     const col4 = $(cells[4]);
     const crewType = col4.find("table.subtablec tr").first().text().trim();
     const crew: CrewMember[] = [];
-    col4.find("table.subtablec tr.note").each((_, crewRow) => {
+    col4.find("table.subtablec tr.note, table.subtablec tr.hv").each((_, crewRow) => {
       const crewCells = $(crewRow).find("td");
-      // Cells: [0]=spacer, [1]=position (e.g. "Lineprsn 1:"), [2]=name, [3]=status icon
-      const position = $(crewCells[1]).text().trim().replace(/:$/, "");
-      const nameEl = $(crewCells[2]);
-      const name = nameEl.text().trim();
+      // tr.note layout: [0]=spacer, [1]=position, [2]=name, [3]=status
+      // tr.hv  layout: [0]=position, [1]=name (no spacer)
+      const isHvRow = $(crewRow).hasClass("hv");
+      const posIdx = isHvRow ? 0 : 1;
+      const nameIdx = isHvRow ? 1 : 2;
+      const position = $(crewCells[posIdx]).text().trim().replace(/:$/, "");
+      const nameEl = $(crewCells[nameIdx]);
+      const isUnassigned = nameEl.find("span.ua").length > 0;
       const isCurrentUser = nameEl.find("span.ongame").length > 0;
+      const name = isUnassigned ? "Unassigned" : nameEl.text().trim();
+
+      // Fee info from td.feeinfo cells (open games page)
+      const feeEl = $(crewRow).find("td.feeinfo").eq(1);
+      const fee = feeEl.text().trim() || undefined;
+
       if (name) {
-        crew.push({ name, position, isCurrentUser: isCurrentUser || undefined });
+        crew.push({
+          name,
+          position,
+          isCurrentUser: isCurrentUser || undefined,
+          unassigned: isUnassigned || undefined,
+          fee,
+        });
       }
     });
 
