@@ -26,6 +26,8 @@ import { getCalendarFeedUrlTool } from "./tools/calendar.js";
 import {
   searchOpenGamesTool,
   searchOpenGamesSchema,
+  requestGameTool,
+  requestGameSchema,
 } from "./tools/open-games.js";
 
 const config = loadConfig();
@@ -91,7 +93,7 @@ server.registerTool("get_game_details", {
 });
 
 server.registerTool("accept_game", {
-  description: "Accept a game assignment. (Not yet implemented — stub.)",
+  description: "Accept a game assignment on RefTown.",
   inputSchema: acceptGameSchema.shape,
 }, async (args) => {
   try {
@@ -105,7 +107,7 @@ server.registerTool("accept_game", {
 });
 
 server.registerTool("decline_game", {
-  description: "Decline a game assignment, with an optional reason. (Not yet implemented — stub.)",
+  description: "Decline a game assignment, with an optional reason for declining.",
   inputSchema: declineGameSchema.shape,
 }, async (args) => {
   try {
@@ -197,6 +199,21 @@ server.registerTool("search_open_games", {
 }, async (args) => {
   try {
     const result = await searchOpenGamesTool(client, args);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
+});
+
+server.registerTool("request_game", {
+  description:
+    "Request assignment to an open/unfilled game on RefTown. Use search_open_games first to find available games.",
+  inputSchema: requestGameSchema.shape,
+}, async (args) => {
+  try {
+    const result = await requestGameTool(client, args);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };

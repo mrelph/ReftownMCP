@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0] - 2026-02-19
+
+### Added
+
+- **`accept_game` tool** — Accept a game assignment by game RID. Fetches the game detail page to discover the assignment RID and official ID, then POSTs the accept form to `games.asp`.
+- **`decline_game` tool** — Decline a game assignment with an optional reason. Sends the decline response with a comment field (`R{assignmentRID}`) for the reason text.
+- **`request_game` tool** — Request assignment to an open/unfilled game via RefTown's self-assign flow. Three-step process: parses the game detail page for the self-assign link (including security hash), loads the confirmation page, then submits the request.
+- **Game detail page parser** (`src/parsers/game-detail.ts`) — Extracts official ID, assignment RID, and self-assign links from `games.asp?RID=X` pages.
+- **11 new tests** — Game detail parser tests (5), HTTP contract tests for accept/decline/request (5), and schema validation for `requestGameSchema` (1). Test suite now has 56 tests total.
+
+### Changed
+
+- `accept_game` and `decline_game` are no longer stubs — they perform real POST requests to RefTown.
+- Updated tool descriptions in MCP server registration to remove "(stub)" labels.
+- `search_open_games` now listed in README tools table.
+
 ## [0.1.1] - 2026-02-09
 
 ### Fixed

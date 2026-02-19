@@ -2,6 +2,7 @@ import { z } from "zod";
 import { RefTownClient } from "../client.js";
 import type { Game, ScheduleResult } from "../types.js";
 import { parseGameTable } from "../parsers/game-table.js";
+import { parseGameDetailPage } from "../parsers/game-detail.js";
 
 export const getScheduleSchema = z.object({
   period: z
@@ -75,28 +76,83 @@ export async function getGameDetailsTool(
   return game;
 }
 
-// TODO: mygames.asp is read-only ("This page can only be used to view the games").
-// Accept/decline must go through games.asp?RID=X which hasn't been fully discovered.
-// These remain stubs until the games.asp form structure is mapped.
-
 export async function acceptGameTool(
-  _client: RefTownClient,
+  client: RefTownClient,
   args: z.infer<typeof acceptGameSchema>
 ): Promise<{ success: boolean; message: string }> {
-  return {
-    success: false,
-    message: `Stub: accept for game ${args.gameId} not yet implemented. ` +
-      "The accept form on games.asp?RID=X needs to be discovered first.",
+  // Step 1: Load the game detail page to extract form fields
+  const $ = await client.get("games.asp", { RID: args.gameId });
+  const detail = parseGameDetailPage($, args.gameId);
+
+  if (!detail.officialId) {
+    return { success: false, message: "Could not find Official ID on game page. Are you logged in?" };
+  }
+  if (!detail.assignmentRID) {
+    return { success: false, message: `No assignment found for you on game ${args.gameId}. You may not be assigned to this game.` };
+  }
+
+  // Step 2: POST the accept form
+  const formData: Record<string, string> = {
+    Official: detail.officialId,
+    Accept: "1",
+    NoMenu: "0",
+    MapEn: "0",
+    NumGames: "25",
+    xAction: "",
+    hRID: args.gameId,
+    [detail.assignmentRID]: "Y",
   };
+
+  const result$ = await client.post("games.asp", formData);
+  const bodyText = result$("body").text().replace(/\s+/g, " ").trim();
+
+  // Check for success indicators
+  if (bodyText.includes("No games found") || bodyText.includes(args.gameId)) {
+    return { success: true, message: `Game ${args.gameId} accepted successfully.` };
+  }
+  if (bodyText.includes("error") || bodyText.includes("Error")) {
+    return { success: false, message: `Accept may have failed. Response: ${bodyText.slice(0, 300)}` };
+  }
+
+  return { success: true, message: `Accept submitted for game ${args.gameId}.` };
 }
 
 export async function declineGameTool(
-  _client: RefTownClient,
+  client: RefTownClient,
   args: z.infer<typeof declineGameSchema>
 ): Promise<{ success: boolean; message: string }> {
-  return {
-    success: false,
-    message: `Stub: decline for game ${args.gameId} not yet implemented. ` +
-      "The decline form on games.asp?RID=X needs to be discovered first.",
+  // Step 1: Load the game detail page to extract form fields
+  const $ = await client.get("games.asp", { RID: args.gameId });
+  const detail = parseGameDetailPage($, args.gameId);
+
+  if (!detail.officialId) {
+    return { success: false, message: "Could not find Official ID on game page. Are you logged in?" };
+  }
+  if (!detail.assignmentRID) {
+    return { success: false, message: `No assignment found for you on game ${args.gameId}. You may not be assigned to this game.` };
+  }
+
+  const reason = args.reason ?? "Declining assignment";
+
+  // Step 2: POST the decline form
+  const formData: Record<string, string> = {
+    Official: detail.officialId,
+    Accept: "1",
+    NoMenu: "0",
+    MapEn: "0",
+    NumGames: "25",
+    xAction: "",
+    hRID: args.gameId,
+    [detail.assignmentRID]: "N",
+    [`R${detail.assignmentRID}`]: reason,
   };
+
+  const result$ = await client.post("games.asp", formData);
+  const bodyText = result$("body").text().replace(/\s+/g, " ").trim();
+
+  if (bodyText.includes("error") || bodyText.includes("Error")) {
+    return { success: false, message: `Decline may have failed. Response: ${bodyText.slice(0, 300)}` };
+  }
+
+  return { success: true, message: `Game ${args.gameId} declined.` };
 }

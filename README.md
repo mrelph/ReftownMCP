@@ -55,7 +55,7 @@ Or if you prefer to use the `.env` file, omit the `env` block and ensure the `.e
 
 ## Available Tools
 
-### Read-Only (Working)
+### Read-Only
 
 | Tool | Description |
 |------|-------------|
@@ -66,13 +66,20 @@ Or if you prefer to use the `.env` file, omit the `env` block and ensure the `.e
 | `get_contacts` | Fetch crew/official contacts. Optional client-side name filter. |
 | `get_profile` | View your official profile, zones, organizations, custom fields. |
 | `get_calendar_feed_url` | Get iCal subscription URLs (games+events, games only, events only). |
+| `search_open_games` | Search for open/unfilled games. Filter by zone, date range, or sport. |
+
+### Write Operations
+
+| Tool | Description |
+|------|-------------|
+| `accept_game` | Accept a game assignment. Requires `gameId` (the game RID). |
+| `decline_game` | Decline a game assignment. Requires `gameId`, optional `reason`. |
+| `request_game` | Request assignment to an open game. Requires `gameId`, optional `duty` (position number). |
 
 ### Stubs (Not Yet Implemented)
 
 | Tool | Why |
 |------|-----|
-| `accept_game` | Requires `games.asp?RID=X` form structure (not yet discovered). |
-| `decline_game` | Same as accept — needs the game detail page form. |
 | `set_availability` | Requires `jx_editavail.asp` AJAX endpoint (form fields unknown). |
 
 ## Development
@@ -111,7 +118,7 @@ Key architectural details:
 
 ## Known Limitations
 
-- **No write operations**: Accept/decline games and set-availability are stubs pending endpoint discovery.
+- **set_availability stub**: Setting availability is still a stub pending `jx_editavail.asp` AJAX endpoint discovery.
 - **Profile sub-pages**: Email, phone, and address require fetching separate profile sub-pages (`?Focus=ContactEmail`, etc.) which aren't implemented yet.
-- **Game details**: The `games.asp` detail page structure is speculative since it hasn't been fully discovered.
 - **Email obfuscation**: Contact emails are reconstructed from RefTown's JavaScript obfuscation (`sb_domain`/`sb_user` variables). If RefTown changes this pattern, email extraction will break.
+- **Self-assign hash**: The request_game tool requires a session-specific hash from the game detail page. If RefTown changes their hash generation, the request flow may break.

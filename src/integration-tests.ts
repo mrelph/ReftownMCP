@@ -11,12 +11,13 @@ import { AuthManager } from "./auth.js";
 import { RefTownClient } from "./client.js";
 import { Config } from "./config.js";
 import { parseGameTable } from "./parsers/game-table.js";
+import { parseGameDetailPage } from "./parsers/game-detail.js";
 import { getAvailabilityTool } from "./tools/availability.js";
 import { getContactsTool } from "./tools/contacts.js";
 import { getProfileTool } from "./tools/profile.js";
 import { getCalendarFeedUrlTool } from "./tools/calendar.js";
-import { searchOpenGamesTool } from "./tools/open-games.js";
-import { getScheduleTool } from "./tools/schedule.js";
+import { searchOpenGamesTool, requestGameTool } from "./tools/open-games.js";
+import { getScheduleTool, acceptGameTool, declineGameTool } from "./tools/schedule.js";
 import { loginTool } from "./tools/login.js";
 import * as cheerio from "cheerio";
 
@@ -212,6 +213,106 @@ const LOGIN_SUCCESS_HTML = `
 <table class="subtable accountlinktable">
   <tr class="aclink"><td></td><td>CHOA</td><td></td><td>Test User</td></tr>
 </table>
+</body></html>`;
+
+// Game detail page with accept/decline form (user assigned, pending acceptance)
+const GAME_DETAIL_ACCEPT_HTML = `
+<html><body>
+<form name="games" action="games.asp" method="POST" onsubmit="return verifyGamesForm(1,10,0,0,0)">
+<input type="HIDDEN" name="Official" value="681">
+<input type="HIDDEN" name="Accept" value="1">
+<input type="HIDDEN" name="NoMenu" value="0">
+<input type="HIDDEN" name="MapEn" value="0">
+<input type="HIDDEN" name="NumGames" value="25">
+<input type="HIDDEN" name="xAction" value="">
+<table border="1" class="subtable floatheader">
+<thead><tr class="subtablehead"><th>Game#<br>Status</th><th>Date<br>Time</th><th>League</th><th>Location</th><th>Officials</th><th>Comments</th></tr></thead>
+<tbody>
+<tr class="game">
+  <td>49811</td>
+  <td>Sat<br>11/2/2024<br>3:30 PM</td>
+  <td>USA<br>REC</td>
+  <td><table><tr><td>@: <B>Sno-King Ice Arena</B></td></tr><tr><td>H: Hawks</td></tr><tr><td>V: Eagles</td></tr></table></td>
+  <td>
+    <table class="subtablec">
+      <tr>Single</tr>
+      <tr class="note"><td></td><td>Referee 1:</td><td><span class="ongame">Test User</span></td><td>
+        <a href="finance.asp?Focus=FIA&RID=272767"></a>
+      </td></tr>
+    </table>
+    <div class="gameacc">Pending</div>
+  </td>
+  <td></td>
+</tr>
+</tbody>
+</table>
+<input type="HIDDEN" name="hRID" value="49811">
+</form>
+</body></html>`;
+
+// Game detail page with self-assign (request) links for open positions
+const GAME_DETAIL_OPEN_HTML = `
+<html><body>
+<form name="games" action="games.asp" method="POST">
+<input type="HIDDEN" name="Official" value="681">
+<input type="HIDDEN" name="Accept" value="1">
+<input type="HIDDEN" name="NoMenu" value="0">
+<input type="HIDDEN" name="MapEn" value="0">
+<input type="HIDDEN" name="NumGames" value="25">
+<input type="HIDDEN" name="xAction" value="">
+<table border="1" class="subtable floatheader">
+<thead><tr class="subtablehead"><th>Game#</th><th>Date<br>Time</th><th>League</th><th>Location</th><th>Officials</th><th>Comments</th></tr></thead>
+<tbody>
+<tr class="game">
+  <td>59382</td>
+  <td>Sat<br>2/21/2026<br>2:55 PM</td>
+  <td>USA<br>Select</td>
+  <td><table><tr><td>@: <B>Kraken Iceplex</B></td></tr><tr><td>H:</td></tr><tr><td>V:</td></tr></table></td>
+  <td>
+    <table class="subtablec">
+      <tr>3 Officials</tr>
+      <tr class="note"><td></td><td>Lineprsn 1:</td><td>Assigned</td><td></td></tr>
+      <tr class="note"><td></td><td>Lineprsn 2:</td><td>Assigned</td><td></td></tr>
+      <tr class="note"><td></td><td>Referee 1:</td><td>Unassigned : <a href="games_selfassign.asp?RID=59382&amp;ogact=TKO&amp;Duty=1&amp;NoMenu=1&amp;hash=abc123def456">Request</a></td><td></td></tr>
+    </table>
+  </td>
+  <td>PNAHA League game</td>
+</tr>
+</tbody>
+</table>
+<input type="HIDDEN" name="hRID" value="59382">
+</form>
+</body></html>`;
+
+// Self-assign confirmation page
+const SELFASSIGN_CONFIRM_HTML = `
+<html><body>
+<div class="head1md">Self-Assignment Confirmation</div>
+<table>
+<tbody>
+<tr><th>Game No.</th><th>Date Time</th><th>Officials</th></tr>
+<tr><td>59382</td><td>Sat 2/21/2026 2:55 PM</td>
+<td><table><tr><td>Referee 1:</td><td>Unassigned</td><td><input type="radio" name="SelDuty_59382" value="1" checked> Request</td></tr></table></td>
+</tr>
+</tbody>
+</table>
+<div>Do you wish to continue?<p><input type="submit" name="ConfirmLinkSet" value="Continue"></p></div>
+</body></html>`;
+
+// Self-assign success response
+const SELFASSIGN_SUCCESS_HTML = `
+<html><body>
+<div class="head1md">Self-Assignment Confirmation</div>
+<div>Your request has been submitted.</div>
+</body></html>`;
+
+// Accept success response (redirects back to game list)
+const ACCEPT_SUCCESS_HTML = `
+<html><body>
+<table class="subtable floatheader">
+<tr class="subtablehead"><th>Game#</th></tr>
+</table>
+<div>No games found matching selected criteria</div>
 </body></html>`;
 
 // ─── Shared Test Config ───────────────────────────────────────────────────────
@@ -497,6 +598,118 @@ async function httpContractTests(): Promise<void> {
 
     const req = capturedRequests.find(r => r.url.includes("profile.asp") && r.url.includes("Focus=ShowPAK"));
     assert(!!req, "Should fetch profile.asp?Focus=ShowPAK");
+    restoreFetch();
+  });
+
+  // --- Accept Game Contract ---
+  await test("Accept game: GETs game detail page then POSTs accept form", async () => {
+    const responses = new Map<string, { status: number; headers?: Record<string, string>; body: string }>();
+    responses.set("login.asp", { status: 200, body: "<html><body>Welcome</body></html>" });
+    responses.set("default.asp", { status: 200, body: "<html><body>Home</body></html>" });
+    // GET games.asp?RID=49811 returns detail with finance link
+    responses.set("games.asp", { status: 200, body: GAME_DETAIL_ACCEPT_HTML });
+    mockFetch(responses);
+
+    const auth = new AuthManager(testConfig);
+    const client = new RefTownClient(testConfig, auth);
+    await acceptGameTool(client, { gameId: "49811" });
+
+    // Should GET game page first
+    const getReq = capturedRequests.find(r => r.url.includes("games.asp") && r.url.includes("RID=49811") && r.method === "GET");
+    assert(!!getReq, "Should GET games.asp?RID=49811");
+
+    // Should POST accept form
+    const postReq = capturedRequests.find(r => r.url.includes("games.asp") && r.method === "POST");
+    assert(!!postReq, "Should POST to games.asp");
+    assert(postReq!.body?.includes("272767=Y"), `POST body should include assignment RID=Y, got ${postReq!.body}`);
+    assert(postReq!.body?.includes("Accept=1"), "POST body should include Accept=1");
+    assert(postReq!.body?.includes("Official=681"), "POST body should include Official=681");
+    assert(postReq!.body?.includes("hRID=49811"), "POST body should include hRID=49811");
+    restoreFetch();
+  });
+
+  // --- Decline Game Contract ---
+  await test("Decline game: POSTs decline with reason", async () => {
+    const responses = new Map<string, { status: number; headers?: Record<string, string>; body: string }>();
+    responses.set("login.asp", { status: 200, body: "<html><body>Welcome</body></html>" });
+    responses.set("default.asp", { status: 200, body: "<html><body>Home</body></html>" });
+    responses.set("games.asp", { status: 200, body: GAME_DETAIL_ACCEPT_HTML });
+    mockFetch(responses);
+
+    const auth = new AuthManager(testConfig);
+    const client = new RefTownClient(testConfig, auth);
+    await declineGameTool(client, { gameId: "49811", reason: "Schedule conflict" });
+
+    const postReq = capturedRequests.find(r => r.url.includes("games.asp") && r.method === "POST");
+    assert(!!postReq, "Should POST to games.asp");
+    assert(postReq!.body?.includes("272767=N"), `POST body should include assignment RID=N, got ${postReq!.body}`);
+    assert(postReq!.body?.includes("R272767=Schedule+conflict") || postReq!.body?.includes("R272767=Schedule%20conflict"),
+      `POST body should include reason in R{RID} field, got ${postReq!.body}`);
+    restoreFetch();
+  });
+
+  // --- Request Game Contract ---
+  await test("Request game: GETs detail, then selfassign confirmation, then submits", async () => {
+    const responses = new Map<string, { status: number; headers?: Record<string, string>; body: string }>();
+    responses.set("login.asp", { status: 200, body: "<html><body>Welcome</body></html>" });
+    responses.set("default.asp", { status: 200, body: "<html><body>Home</body></html>" });
+    responses.set("games.asp", { status: 200, body: GAME_DETAIL_OPEN_HTML });
+    responses.set("games_selfassign.asp", { status: 200, body: SELFASSIGN_CONFIRM_HTML });
+    mockFetch(responses);
+
+    const auth = new AuthManager(testConfig);
+    const client = new RefTownClient(testConfig, auth);
+    const result = await requestGameTool(client, { gameId: "59382" });
+
+    // Should GET game detail page first
+    const detailReq = capturedRequests.find(r => r.url.includes("games.asp") && r.url.includes("RID=59382"));
+    assert(!!detailReq, "Should GET games.asp?RID=59382");
+
+    // Should GET selfassign confirmation page (with hash)
+    const confirmReq = capturedRequests.find(r => r.url.includes("games_selfassign.asp") && r.url.includes("hash="));
+    assert(!!confirmReq, "Should GET games_selfassign.asp with hash");
+
+    // Should GET selfassign submission (with OGAct=1 and ConfirmLinkSet)
+    const submitReq = capturedRequests.find(r => r.url.includes("games_selfassign.asp") && r.url.includes("OGAct=1"));
+    assert(!!submitReq, "Should GET games_selfassign.asp with OGAct=1");
+    assert(submitReq!.url.includes("ConfirmLinkSet=Continue"), `Should include ConfirmLinkSet, got ${submitReq!.url}`);
+    assert(submitReq!.url.includes("SelDuty_59382=1"), `Should include SelDuty_59382=1, got ${submitReq!.url}`);
+
+    assert(result.success === true, `Request should succeed, got: ${result.message}`);
+    restoreFetch();
+  });
+
+  await test("Accept game: fails gracefully when user not assigned", async () => {
+    const responses = new Map<string, { status: number; headers?: Record<string, string>; body: string }>();
+    responses.set("login.asp", { status: 200, body: "<html><body>Welcome</body></html>" });
+    responses.set("default.asp", { status: 200, body: "<html><body>Home</body></html>" });
+    // Open game page has no finance link (user not assigned)
+    responses.set("games.asp", { status: 200, body: GAME_DETAIL_OPEN_HTML });
+    mockFetch(responses);
+
+    const auth = new AuthManager(testConfig);
+    const client = new RefTownClient(testConfig, auth);
+    const result = await acceptGameTool(client, { gameId: "59382" });
+
+    assert(result.success === false, "Should fail when user not assigned");
+    assert(result.message.includes("No assignment"), `Message should mention no assignment, got: ${result.message}`);
+    restoreFetch();
+  });
+
+  await test("Request game: fails gracefully when no open positions", async () => {
+    const responses = new Map<string, { status: number; headers?: Record<string, string>; body: string }>();
+    responses.set("login.asp", { status: 200, body: "<html><body>Welcome</body></html>" });
+    responses.set("default.asp", { status: 200, body: "<html><body>Home</body></html>" });
+    // Accept page has no selfassign links (all filled or not self-assignable)
+    responses.set("games.asp", { status: 200, body: GAME_DETAIL_ACCEPT_HTML });
+    mockFetch(responses);
+
+    const auth = new AuthManager(testConfig);
+    const client = new RefTownClient(testConfig, auth);
+    const result = await requestGameTool(client, { gameId: "49811" });
+
+    assert(result.success === false, "Should fail when no open positions");
+    assert(result.message.includes("No open positions"), `Message should mention no open positions, got: ${result.message}`);
     restoreFetch();
   });
 }
@@ -860,6 +1073,40 @@ async function htmlParserTests(): Promise<void> {
     assert(result.name === "Test User", `Name should be Test User, got ${result.name}`);
     restoreFetch();
   });
+
+  // --- Game Detail Parser ---
+  await test("Game detail: extracts Official ID from hidden form field", () => {
+    const $ = cheerio.load(GAME_DETAIL_ACCEPT_HTML);
+    const detail = parseGameDetailPage($, "49811");
+    assert(detail.officialId === "681", `Official ID should be 681, got ${detail.officialId}`);
+  });
+
+  await test("Game detail: extracts assignment RID from finance link", () => {
+    const $ = cheerio.load(GAME_DETAIL_ACCEPT_HTML);
+    const detail = parseGameDetailPage($, "49811");
+    assert(detail.assignmentRID === "272767", `Assignment RID should be 272767, got ${detail.assignmentRID}`);
+  });
+
+  await test("Game detail: parses self-assign links for open positions", () => {
+    const $ = cheerio.load(GAME_DETAIL_OPEN_HTML);
+    const detail = parseGameDetailPage($, "59382");
+    assert(detail.selfAssignLinks.length === 1, `Should have 1 self-assign link, got ${detail.selfAssignLinks.length}`);
+    assert(detail.selfAssignLinks[0].duty === "1", `Duty should be 1, got ${detail.selfAssignLinks[0].duty}`);
+    assert(detail.selfAssignLinks[0].url.includes("hash=abc123def456"), "URL should contain hash");
+    assert(detail.selfAssignLinks[0].url.includes("games_selfassign.asp"), "URL should point to games_selfassign.asp");
+  });
+
+  await test("Game detail: returns empty selfAssignLinks when no open positions", () => {
+    const $ = cheerio.load(GAME_DETAIL_ACCEPT_HTML);
+    const detail = parseGameDetailPage($, "49811");
+    assert(detail.selfAssignLinks.length === 0, `Should have 0 self-assign links, got ${detail.selfAssignLinks.length}`);
+  });
+
+  await test("Game detail: returns no assignmentRID when user not assigned", () => {
+    const $ = cheerio.load(GAME_DETAIL_OPEN_HTML);
+    const detail = parseGameDetailPage($, "59382");
+    assert(!detail.assignmentRID, `Should have no assignment RID, got ${detail.assignmentRID}`);
+  });
 }
 
 // ─── Layer 3: Live Integration Tests ──────────────────────────────────────────
@@ -1039,23 +1286,21 @@ async function mcpServerTests(): Promise<void> {
     assert(threw, "Month < 1 should be rejected");
   });
 
-  await test("MCP: Stub tools return structured not-implemented response", async () => {
-    const { acceptGameTool, declineGameTool } = await import("./tools/schedule.js");
+  await test("MCP: Remaining stub tools return structured not-implemented response", async () => {
     const { setAvailabilityTool } = await import("./tools/availability.js");
 
     const testConfig: Config = { username: "", password: "", baseUrl: "", requestDelayMs: 0 };
     const auth = new AuthManager(testConfig);
     const client = new RefTownClient(testConfig, auth);
 
-    const accept = await acceptGameTool(client, { gameId: "123" });
-    assert(accept.success === false, "Stub accept should return success=false");
-    assert(accept.message.includes("not yet implemented"), "Stub should say not implemented");
-
-    const decline = await declineGameTool(client, { gameId: "123" });
-    assert(decline.success === false, "Stub decline should return success=false");
-
     const setAvail = await setAvailabilityTool(client, { dates: [] });
     assert(setAvail.success === false, "Stub setAvailability should return success=false");
+  });
+
+  await test("MCP: requestGameSchema validates correctly", async () => {
+    const { requestGameSchema } = await import("./tools/open-games.js");
+    assert(!!requestGameSchema.parse({ gameId: "59382" }), "gameId string should be valid");
+    assert(!!requestGameSchema.parse({ gameId: "59382", duty: "1" }), "gameId with duty should be valid");
   });
 }
 
