@@ -46,13 +46,25 @@ export async function getGameDetailsTool(
   client: RefTownClient,
   args: z.infer<typeof getGameDetailsSchema>
 ): Promise<Game> {
-  // TODO: games.asp detail page HTML structure not yet discovered.
-  // Fetching games.asp?RID=X and extracting what we can.
   const $ = await client.get("games.asp", { RID: args.gameId });
 
-  const bodyText = $("body").text().replace(/\s+/g, " ").trim();
+  // The detail page uses the same table.subtable.floatheader tr.game layout as the list view
+  const games = parseGameTable($);
+  if (games.length > 0) {
+    const game = games[0];
+    // Enrich with detail-page-specific data from parseGameDetailPage
+    const detail = parseGameDetailPage($, args.gameId);
+    if (detail.selfAssignLinks.length > 0) {
+      (game as any).selfAssignPositions = detail.selfAssignLinks.map(
+        (l) => `${l.position} (duty ${l.duty})`
+      );
+    }
+    return game;
+  }
 
-  const game: Game = {
+  // Fallback: page didn't contain a parseable game row
+  const bodyText = $("body").text().replace(/\s+/g, " ").trim();
+  return {
     id: args.gameId,
     date: "",
     time: "",
@@ -64,16 +76,8 @@ export async function getGameDetailsTool(
     position: "",
     status: "",
     crew: [],
-    comments: bodyText.slice(0, 1000) || undefined,
+    comments: `Could not parse game details. Page preview: ${bodyText.slice(0, 500)}`,
   };
-
-  // Try to extract basic info from whatever structure games.asp provides
-  const head = $("div.head1md, div.head1, h1, h2").first().text().trim();
-  if (head) {
-    game.comments = `Page heading: ${head}. ${game.comments}`;
-  }
-
-  return game;
 }
 
 export async function acceptGameTool(
